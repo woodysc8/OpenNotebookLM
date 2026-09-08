@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     yt_whisper_cache_dir: str = "./models/whisper"
     
     # File Upload
+    upload_dir: str = "./uploads"
     max_file_size_mb: int = 50
     allowed_file_types: str = "pdf,txt,md"
     max_url_download_mb: int = 10

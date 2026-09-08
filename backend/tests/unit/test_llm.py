@@ -200,7 +200,7 @@ def test_output_budget_is_lifted_to_the_floor(settings, monkeypatch, fake_openai
 
     LLMService().generate("Question: what is the total?", max_tokens=512)
 
-    assert fake_openai.requests[-1]["max_tokens"] == 2048
+    assert fake_openai.requests[-1]["max_completion_tokens"] == 2048
 
 
 def test_output_budget_above_the_floor_is_left_alone(
@@ -212,7 +212,60 @@ def test_output_budget_above_the_floor_is_left_alone(
 
     LLMService().generate("Question: what is the total?", max_tokens=4096)
 
-    assert fake_openai.requests[-1]["max_tokens"] == 4096
+    assert fake_openai.requests[-1]["max_completion_tokens"] == 4096
+
+
+def test_native_gpt5_uses_reasoning_request_parameters(
+    settings, monkeypatch, fake_openai
+):
+    """Native GPT-5 rejects temperature and legacy max_tokens."""
+    monkeypatch.setattr(settings, "openai_api_key", "sk-openai-test")
+    monkeypatch.setattr(settings, "openai_model", "gpt-5.6")
+    monkeypatch.setattr(settings, "openai_min_max_tokens", 2048)
+
+    result = LLMService().generate(
+        "Question: what is the total?",
+        temperature=0.7,
+        max_tokens=512,
+    )
+
+    sent = fake_openai.requests[-1]
+    assert "temperature" not in sent
+    assert "max_tokens" not in sent
+    assert sent["max_completion_tokens"] == 2048
+    assert result["model"] == "llama-3.3-70b-versatile"
+
+
+def test_compatible_provider_keeps_chat_completion_parameters(
+    settings, monkeypatch, fake_openai
+):
+    """OpenAI-compatible endpoints retain their existing request contract."""
+    monkeypatch.setattr(settings, "openai_api_key", "gsk-test")
+    monkeypatch.setattr(settings, "openai_base_url", "https://api.groq.com/openai/v1")
+    monkeypatch.setattr(settings, "openai_model", "llama-3.3-70b-versatile")
+
+    LLMService().generate("Question: what is the total?", temperature=0.4, max_tokens=512)
+
+    sent = fake_openai.requests[-1]
+    assert sent["temperature"] == 0.4
+    assert sent["max_tokens"] == 512
+    assert "max_completion_tokens" not in sent
+
+
+def test_gpt5_model_on_compatible_endpoint_keeps_compatible_parameters(
+    settings, monkeypatch, fake_openai
+):
+    """A custom endpoint decides the protocol, even when its model is GPT-5 named."""
+    monkeypatch.setattr(settings, "openai_api_key", "gsk-test")
+    monkeypatch.setattr(settings, "openai_base_url", "https://proxy.example/v1")
+    monkeypatch.setattr(settings, "openai_model", "gpt-5.6")
+
+    LLMService().generate("Question: what is the total?", temperature=0.4, max_tokens=512)
+
+    sent = fake_openai.requests[-1]
+    assert sent["temperature"] == 0.4
+    assert sent["max_tokens"] == 512
+    assert "max_completion_tokens" not in sent
 
 
 def test_reasoning_format_is_sent_when_configured(settings, monkeypatch, fake_openai):

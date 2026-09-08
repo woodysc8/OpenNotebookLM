@@ -8,8 +8,10 @@ inside the uploads directory.
 from pathlib import Path
 from typing import Optional
 
-# Uploaded files live here, relative to the process working directory.
-UPLOAD_DIR = Path("./uploads")
+from app.config import get_settings
+
+# Uploaded files live here, relative to the process working directory by default.
+UPLOAD_DIR = Path(get_settings().upload_dir)
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 

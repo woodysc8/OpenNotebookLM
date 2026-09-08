@@ -242,6 +242,10 @@ class TokenBudgetTooSmallError(RuntimeError):
 class OpenAICompatibleProvider:
     """OpenAI, or any server speaking the same chat-completions API."""
 
+    def _uses_openai_reasoning_parameters(self) -> bool:
+        """Whether this native OpenAI model requires reasoning parameters."""
+        return self._native_openai and self.model.lower().startswith("gpt-5")
+
     def __init__(
         self,
         name: str,
@@ -257,6 +261,7 @@ class OpenAICompatibleProvider:
 
         self.name = name
         self.model = model
+        self._native_openai = name == "openai" and not base_url
         self.reasoning_format = reasoning_format
         self.min_max_tokens = min_max_tokens
         self._configured_max_output = max_output_tokens
@@ -410,10 +415,8 @@ class OpenAICompatibleProvider:
         request: Dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
             # A reasoning model writes its thinking into this budget first, so
             # the floor is what keeps the ceiling from cutting off the answer.
-            "max_tokens": self._budget(max_tokens, messages),
         }
         if json_mode:
             request["response_format"] = {"type": "json_object"}
@@ -422,7 +425,16 @@ class OpenAICompatibleProvider:
             # Groq rejects raw <think> text with JSON mode. Keep this local to
             # the request so ordinary answers retain the configured format.
             reasoning_format = "hidden"
+        budget = self._budget(max_tokens, messages)
+        if self._uses_openai_reasoning_parameters():
+            # Native OpenAI reasoning models reject temperature and the legacy
+            # max_tokens field. Compatible providers still use the old names.
+            request["max_completion_tokens"] = budget
+        else:
+            request["temperature"] = temperature
+            request["max_tokens"] = budget
         if reasoning_format:
+
             # Not part of the OpenAI API. It travels in extra_body, and only
             # when configured, because OpenAI rejects parameters it does not
             # recognise — which would take down the default path.
@@ -497,13 +509,18 @@ class OpenAICompatibleProvider:
             # Remembered before the retry is sized, so that a ceiling too tight
             # for this prompt still spares the next one the same refusal.
             self._max_request_tokens = ceiling
-            request["max_tokens"] = self._budget(max_tokens, messages)
+            budget_key = (
+                "max_completion_tokens"
+                if self._uses_openai_reasoning_parameters()
+                else "max_tokens"
+            )
+            request[budget_key] = self._budget(max_tokens, messages)
             logger.warning(
                 "Provider refused the request size; retrying inside its ceiling",
                 provider=self.name,
                 model=self.model,
                 request_ceiling=ceiling,
-                max_tokens=request["max_tokens"],
+                max_tokens=request[budget_key],
             )
 
             return self._client.chat.completions.create(**request)

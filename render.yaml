@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: second-brain
+    runtime: python
+    buildCommand: pip install -r backend/requirements-minimal.txt
+    startCommand: cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /readyz
+    disk:
+      name: second-brain-data
+      mountPath: /opt/render/project/src/backend/runtime
+      sizeGB: 10
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite:////opt/render/project/src/backend/runtime/data/opennotebook.db
+      - key: DB_PATH
+        value: /opt/render/project/src/backend/runtime/data/opennotebook.db
+      - key: UPLOAD_DIR
+        value: /opt/render/project/src/backend/runtime/uploads
+      - key: SENTENCE_TRANSFORMERS_HOME
+        value: /opt/render/project/src/backend/runtime/models
+      - key: HF_HOME
+        value: /opt/render/project/src/backend/runtime/models
+      - key: YT_WHISPER_CACHE_DIR
+        value: /opt/render/project/src/backend/runtime/models/whisper
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: SEED_DEMO_USER
+        value: "false"
