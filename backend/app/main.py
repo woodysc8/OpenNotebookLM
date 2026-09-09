@@ -1,6 +1,9 @@
 """Main FastAPI application."""
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from app.config import get_settings
 from app.lifecycle import lifespan
@@ -54,24 +57,12 @@ app.include_router(video.router, prefix="/api", tags=["video summary"])
 app.include_router(cache.router)  # Cache management endpoints
 
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 async def root():
-    """Describe the running service and its discovery endpoints.
-
-    Args:
-        None.
-
-    Returns:
-        Basic application metadata and health endpoint locations.
-    """
-    return {
-        "name": settings.app_name,
-        "version": "0.1.0",
-        "status": "running",
-        "docs": "/docs",
-        "health": "/healthz",
-        "readiness": "/readyz",
-    }
+    """Serve the Second Brain web interface."""
+    return FileResponse(
+        Path(__file__).resolve().parent / "static" / "index.html"
+    )
 
 
 if __name__ == "__main__":

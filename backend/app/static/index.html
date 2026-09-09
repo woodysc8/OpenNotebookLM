@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Second Brain</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 20px;
+        background: #f5f5f5;
+        color: #222;
+    }
+    h1 { margin-bottom: 6px; }
+    .subtitle { color: #666; margin-bottom: 28px; }
+    .card {
+        background: white;
+        padding: 22px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 8px rgba(0,0,0,.08);
+    }
+    input, button, textarea {
+        font: inherit;
+        box-sizing: border-box;
+    }
+    input[type="text"], input[type="password"], textarea {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 7px;
+        margin: 6px 0 12px;
+    }
+    textarea { min-height: 100px; resize: vertical; }
+    button {
+        padding: 10px 16px;
+        border: 0;
+        border-radius: 7px;
+        background: #222;
+        color: white;
+        cursor: pointer;
+    }
+    button:hover { opacity: .85; }
+    .dropzone {
+        border: 2px dashed #aaa;
+        border-radius: 10px;
+        padding: 35px;
+        text-align: center;
+        margin: 12px 0;
+        cursor: pointer;
+    }
+    .dropzone.dragover { background: #eee; }
+    .status { margin-top: 12px; color: #666; }
+    .doc {
+        border-top: 1px solid #eee;
+        padding: 12px 0;
+        display: flex;
+        justify-content: space-between;
+        gap: 15px;
+        align-items: center;
+    }
+    .answer {
+        white-space: pre-wrap;
+        line-height: 1.5;
+        background: #f7f7f7;
+        padding: 15px;
+        border-radius: 8px;
+    }
+    .sources {
+        color: #666;
+        font-size: 14px;
+        margin-top: 12px;
+    }
+    .hidden { display: none; }
+    .error { color: #b00020; }
+    .success { color: #137333; }
+</style>
+</head>
+<body>
+
+<h1>Second Brain</h1>
+<div class="subtitle">Upload knowledge, then ask your brain questions about it.</div>
+
+<div id="loginCard" class="card">
+    <h2>Sign in</h2>
+    <label>Username</label>
+    <input id="username" type="text" value="demo">
+
+    <label>Password</label>
+    <input id="password" type="password" value="demo1234">
+
+    <button onclick="login()">Sign in</button>
+    <div id="loginStatus" class="status"></div>
+</div>
+
+<div id="app" class="hidden">
+
+    <div class="card">
+        <h2>Upload knowledge</h2>
+
+        <div id="dropzone" class="dropzone">
+            <strong>Drop a PDF here</strong><br>
+            or click to choose a file
+            <input id="fileInput" type="file" accept=".pdf,application/pdf" hidden>
+        </div>
+
+        <div id="uploadStatus" class="status"></div>
+    </div>
+
+    <div class="card">
+        <h2>Your documents</h2>
+        <div id="documents">Loading...</div>
+    </div>
+
+    <div class="card">
+        <h2>Ask your Second Brain</h2>
+        <textarea id="question" placeholder="Ask something about your uploaded knowledge..."></textarea>
+        <button onclick="askBrain()">Ask</button>
+
+        <div id="queryStatus" class="status"></div>
+        <div id="answerContainer" class="hidden">
+            <h3>Answer</h3>
+            <div id="answer" class="answer"></div>
+            <div id="sources" class="sources"></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+let token = null;
+let projectId = null;
+
+const API = "";
+
+function headers() {
+    return {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json"
+    };
+}
+
+async function login() {
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+    const status = document.getElementById("loginStatus");
+
+    status.textContent = "Signing in...";
+
+    try {
+        const body = new URLSearchParams();
+        body.append("username", username);
+        body.append("password", password);
+
+        const response = await fetch(API + "/api/auth/token", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || "Login failed");
+        }
+
+        token = data.access_token;
+        status.textContent = "";
+
+        document.getElementById("loginCard").classList.add("hidden");
+        document.getElementById("app").classList.remove("hidden");
+
+        await loadProject();
+        await loadDocuments();
+
+    } catch (error) {
+        status.textContent = error.message;
+        status.className = "status error";
+    }
+}
+
+async function loadProject() {
+    const response = await fetch(API + "/api/projects", {
+        headers: headers()
+    });
+
+    if (!response.ok) {
+        throw new Error("Could not load projects");
+    }
+
+    const projects = await response.json();
+
+    if (Array.isArray(projects) && projects.length > 0) {
+        projectId = projects[0].id;
+        return;
+    }
+
+    const createResponse = await fetch(API + "/api/projects", {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({
+            name: "My Second Brain",
+            description: "Personal knowledge base"
+        })
+    });
+
+    if (!createResponse.ok) {
+        throw new Error("Could not create your Second Brain project");
+    }
+
+    const project = await createResponse.json();
+    projectId = project.id;
+}
+
+async function uploadFile(file) {
+    const status = document.getElementById("uploadStatus");
+
+    if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
+        status.textContent = "Please choose a PDF file.";
+        status.className = "status error";
+        return;
+    }
+
+    status.textContent = "Uploading " + file.name + "...";
+    status.className = "status";
+
+    const form = new FormData();
+    form.append("file", file);
+
+    try {
+        const response = await fetch(
+            API + "/api/projects/" + projectId + "/upload",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + token
+                },
+                body: form
+            }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || "Upload failed");
+        }
+
+        status.textContent = "Uploaded. Processing document...";
+        status.className = "status success";
+
+        await waitForDocument(data.doc_id);
+
+        status.textContent = "Document is ready.";
+        await loadDocuments();
+
+    } catch (error) {
+        status.textContent = error.message;
+        status.className = "status error";
+    }
+}
+
+async function waitForDocument(docId) {
+    for (let i = 0; i < 120; i++) {
+        const response = await fetch(
+            API + "/api/docs/" + docId + "/status",
+            {
+                headers: {
+                    "Authorization": "Bearer " + token
+                }
+            }
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+
+            if (data.status === "ready") {
+                return;
+            }
+
+            if (data.status === "error" || data.status === "failed") {
+                throw new Error(data.error_message || "Document processing failed");
+            }
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    throw new Error("Document processing is taking too long.");
+}
+
+async function loadDocuments() {
+    const container = document.getElementById("documents");
+
+    try {
+        const response = await fetch(
+            API + "/api/projects/" + projectId + "/documents",
+            {
+                headers: {
+                    "Authorization": "Bearer " + token
+                }
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error("Could not load documents");
+        }
+
+        const documents = await response.json();
+
+        if (!documents || documents.length === 0) {
+            container.textContent = "No documents uploaded yet.";
+            return;
+        }
+
+        container.innerHTML = "";
+
+        documents.forEach(doc => {
+            const row = document.createElement("div");
+            row.className = "doc";
+
+            const info = document.createElement("div");
+            info.textContent =
+                (doc.title || doc.filename || "Untitled") +
+                " — " +
+                (doc.status || "unknown");
+
+            const button = document.createElement("button");
+            button.textContent = "Delete";
+            button.onclick = () => deleteDocument(doc.id);
+
+            row.appendChild(info);
+            row.appendChild(button);
+            container.appendChild(row);
+        });
+
+    } catch (error) {
+        container.textContent = error.message;
+        container.className = "error";
+    }
+}
+
+async function deleteDocument(docId) {
+    if (!confirm("Delete this document from your Second Brain?")) {
+        return;
+    }
+
+    const response = await fetch(
+        API + "/api/docs/" + docId,
+        {
+            method: "DELETE",
+            headers: {
+                "Authorization": "Bearer " + token
+            }
+        }
+    );
+
+    if (response.ok) {
+        await loadDocuments();
+    }
+}
+
+async function askBrain() {
+    const question = document.getElementById("question").value.trim();
+    const status = document.getElementById("queryStatus");
+    const answerContainer = document.getElementById("answerContainer");
+
+    if (!question) {
+        return;
+    }
+
+    status.textContent = "Thinking...";
+    answerContainer.classList.add("hidden");
+
+    try {
+        const response = await fetch(API + "/api/query", {
+            method: "POST",
+            headers: headers(),
+            body: JSON.stringify({
+                query: question,
+                project_id: projectId,
+                top_k: 5,
+                include_sources: true
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.detail || "Query failed");
+        }
+
+        document.getElementById("answer").textContent =
+            data.answer || "No answer returned.";
+
+        const sources = data.sources || [];
+
+        document.getElementById("sources").textContent =
+            sources.length
+                ? "Sources: " + sources.map(s =>
+                    s.source_name || s.title || "Document"
+                  ).join(", ")
+                : "";
+
+        answerContainer.classList.remove("hidden");
+        status.textContent = "";
+
+    } catch (error) {
+        status.textContent = error.message;
+        status.className = "status error";
+    }
+}
+
+const dropzone = document.getElementById("dropzone");
+const fileInput = document.getElementById("fileInput");
+
+dropzone.addEventListener("click", () => fileInput.click());
+
+fileInput.addEventListener("change", event => {
+    if (event.target.files.length) {
+        uploadFile(event.target.files[0]);
+    }
+});
+
+dropzone.addEventListener("dragover", event => {
+    event.preventDefault();
+    dropzone.classList.add("dragover");
+});
+
+dropzone.addEventListener("dragleave", () => {
+    dropzone.classList.remove("dragover");
+});
+
+dropzone.addEventListener("drop", event => {
+    event.preventDefault();
+    dropzone.classList.remove("dragover");
+
+    if (event.dataTransfer.files.length) {
+        uploadFile(event.dataTransfer.files[0]);
+    }
+});
+</script>
+
+</body>
+</html>
