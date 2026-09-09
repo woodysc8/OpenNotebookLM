@@ -243,10 +243,26 @@ async function uploadFile(file) {
             }
         );
 
-        const data = await response.json();
+        const contentType = response.headers.get("content-type") || "";
+        let data = null;
+        let responseText = "";
+
+        if (contentType.toLowerCase().includes("application/json")) {
+            data = await response.json();
+        } else {
+            responseText = await response.text();
+        }
 
         if (!response.ok) {
-            throw new Error(data.detail || "Upload failed");
+            const detail = data && data.detail
+                ? data.detail
+                : responseText.trim() || "Upload failed";
+            throw new Error("Upload failed (HTTP " + response.status + "): " + detail);
+        }
+
+        if (!data) {
+            throw new Error("Upload failed (HTTP " + response.status + "): " +
+                (responseText.trim() || "Server returned a non-JSON response"));
         }
 
         status.textContent = "Uploaded. Processing document...";

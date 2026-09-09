@@ -22,6 +22,17 @@ from app.services.rate_limit import ConcurrencyLimiter, SlidingWindowRateLimiter
 from app.utils.network import UnsafeURLError
 
 
+def test_minimal_requirements_pin_httpx_for_openai_compatibility():
+    """The lazy OpenAI upload path must use the compatible httpx release."""
+    requirements = (
+        __import__("pathlib").Path(__file__).parents[1]
+        / "requirements-minimal.txt"
+    ).read_text(encoding="utf-8")
+
+    assert "openai==3.8.0" in requirements
+    assert "httpx==0.27.2" in requirements
+
+
 class OversizedPDFStream:
     """A 50 MiB+ stream that fails the test if production requests all bytes."""
 
