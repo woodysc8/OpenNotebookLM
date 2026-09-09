@@ -1,4 +1,6 @@
-"""Unit tests for the lexical scoring and rank fusion used by hybrid retrieval."""
+"""Unit tests for lexical scoring, rank fusion, and hybrid retrieval ordering."""
+
+from app.services.rag import RAGService
 from app.services import retrieval
 
 
@@ -118,3 +120,83 @@ class TestDedupe:
     def test_threshold_of_one_disables_dedupe(self):
         items = [{"text": "same text"}, {"text": "same text"}]
         assert len(retrieval.dedupe_near_duplicates(items, self._tokens, threshold=1.0)) == 2
+
+
+class TestHybridReranking:
+    """Strong lexical evidence gets a bounded boost after RRF."""
+
+    @staticmethod
+    def _item(chunk_id, text, score):
+        return {
+            "chunk_id": chunk_id,
+            "document_id": "document",
+            "text": text,
+            "score": score,
+            "metadata": {"heading_path": None},
+        }
+
+    def test_strong_lexical_match_overcomes_modest_rrf_disadvantage(
+        self, monkeypatch
+    ):
+        service = RAGService.__new__(RAGService)
+        dense = [self._item("semantic-strong", "A semantic result", 0.91)]
+        lexical = [self._item("fact", "An exact factual passage", 8.0)]
+        monkeypatch.setattr(
+            retrieval,
+            "fuse_rankings",
+            lambda *_args, **_kwargs: {
+                "semantic-strong": (0.010, 0.010),
+                "fact": (0.009, 0.009),
+            },
+        )
+
+        results = service._fuse(dense, lexical, top_k=2)
+
+        assert [item["chunk_id"] for item in results] == ["fact", "semantic-strong"]
+
+    def test_weaker_lexical_match_does_not_overcome_substantial_rrf_gap(
+        self, monkeypatch
+    ):
+        service = RAGService.__new__(RAGService)
+        dense = [self._item("semantic-strong", "A semantic result", 0.91)]
+        lexical = [
+            self._item("weak-fact", "A loosely related result", 2.0),
+        ]
+        monkeypatch.setattr(
+            retrieval,
+            "fuse_rankings",
+            lambda *_args, **_kwargs: {
+                "semantic-strong": (0.020, 0.020),
+                "weak-fact": (0.010, 0.010),
+            },
+        )
+
+        results = service._fuse(dense, lexical, top_k=2)
+
+        assert [item["chunk_id"] for item in results] == ["semantic-strong", "weak-fact"]
+
+    def test_semantic_order_is_preserved_without_lexical_evidence(self):
+        service = RAGService.__new__(RAGService)
+        dense = [
+            self._item("semantic-best", "A related concept", 0.91),
+            self._item("semantic-next", "Another related concept", 0.82),
+        ]
+
+        results = service._fuse(dense, [], top_k=2)
+
+        assert [item["chunk_id"] for item in results] == [
+            "semantic-best", "semantic-next"
+        ]
+
+    def test_dedupe_and_top_k_still_apply_after_lexical_priority(self):
+        service = RAGService.__new__(RAGService)
+        dense = []
+        lexical = [
+            self._item("fact", "College of the Holy Cross", 8.0),
+            self._item("duplicate", "College of the Holy Cross", 7.5),
+            self._item("other", "Sam lives in Boston", 6.0),
+        ]
+
+        results = service._fuse(dense, lexical, top_k=2)
+
+        assert [item["chunk_id"] for item in results] == ["fact", "other"]

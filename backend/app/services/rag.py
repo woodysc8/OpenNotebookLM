@@ -613,14 +613,36 @@ class RAGService:
             k=settings.hybrid_rrf_k,
         )
 
+        lexical_scores = {
+            item["chunk_id"]: max(float(item.get("score", 0.0)), 0.0)
+            for item in lexical
+        }
+        strongest_lexical_score = max(lexical_scores.values(), default=0.0)
+
+        def lexical_boost(item: Dict[str, Any]) -> float:
+            """Add a bounded boost for strong BM25 evidence after RRF."""
+            if strongest_lexical_score <= 0:
+                return 0.0
+            relative_score = (
+                lexical_scores.get(item["chunk_id"], 0.0)
+                / strongest_lexical_score
+            )
+            # The square makes moderate overlap a small nudge, while the cap
+            # keeps lexical evidence from replacing a substantially stronger
+            # semantic result.
+            return 0.003 * relative_score * relative_score
+
         ordered = sorted(
             payloads.values(),
-            key=lambda item: fused.get(item["chunk_id"], (0.0, 0.0)),
+            key=lambda item: (
+                sum(fused.get(item["chunk_id"], (0.0, 0.0)))
+                + lexical_boost(item),
+            ),
             reverse=True,
         )
         for item in ordered:
             best, total = fused.get(item["chunk_id"], (0.0, 0.0))
-            item["rerank_score"] = best + total
+            item["rerank_score"] = best + total + lexical_boost(item)
 
         tokens = {item["chunk_id"]: retrieval.tokenize(item["text"]) for item in ordered}
         deduped = retrieval.dedupe_near_duplicates(
