@@ -18,6 +18,14 @@ services:
         value: ./models
       - key: YT_WHISPER_CACHE_DIR
         value: ./models/whisper
+      - key: EMBEDDING_PROVIDER
+        value: openai
+      - key: EMB_MODEL_NAME
+        value: text-embedding-3-small
+      - key: EMB_DIMENSION
+        value: "1536"
+      - key: OPENAI_API_KEY
+        sync: false
       - key: APP_ENV
         value: production
       - key: DEBUG

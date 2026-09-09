@@ -7,8 +7,6 @@ from typing import List, Dict, Any, Optional, Union
 import numpy as np
 import structlog
 from sqlalchemy.orm import Session
-from sentence_transformers import SentenceTransformer
-import torch
 
 from app.config import get_settings
 from app.db.models import Document, Chunk, Embedding
@@ -51,6 +49,7 @@ class EmbeddingService:
     
     _instance = None
     _model = None
+    _client = None
     
     def __new__(cls):
         """Singleton pattern to avoid loading model multiple times."""
@@ -60,13 +59,39 @@ class EmbeddingService:
     
     def __init__(self):
         """Initialize embedding service."""
-        if EmbeddingService._model is None:
+        provider = getattr(get_settings(), "embedding_provider", "local").lower()
+        if provider not in {"local", "openai"}:
+            raise ValueError(
+                "EMBEDDING_PROVIDER must be either 'local' or 'openai'"
+            )
+        if provider == "openai":
+            if EmbeddingService._client is None:
+                self._initialize_openai()
+        elif EmbeddingService._model is None:
             self._initialize_model()
+
+    def _initialize_openai(self):
+        """Initialize the configured OpenAI-compatible embeddings client."""
+        from openai import OpenAI
+
+        settings = get_settings()
+        if not settings.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY is required when EMBEDDING_PROVIDER is 'openai'"
+            )
+
+        client_options = {"api_key": settings.openai_api_key}
+        if settings.openai_base_url:
+            client_options["base_url"] = settings.openai_base_url
+        EmbeddingService._client = OpenAI(**client_options)
     
     def _initialize_model(self):
         """Load the embedding model."""
         settings = get_settings()
         try:
+            from sentence_transformers import SentenceTransformer
+            import torch
+
             logger.info(f"Loading embedding model: {settings.emb_model_name}")
             
             # Set device
@@ -95,6 +120,45 @@ class EmbeddingService:
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             raise
+
+    @staticmethod
+    def _normalize_embedding(embedding: np.ndarray) -> np.ndarray:
+        """Normalize one embedding when cosine-compatible vectors are needed."""
+        norm = np.linalg.norm(embedding)
+        return embedding / norm if norm else embedding
+
+    def _generate_openai_embeddings(
+        self,
+        texts: List[str],
+        normalize: bool,
+    ) -> np.ndarray:
+        """Generate a batch through OpenAI's embeddings API."""
+        if EmbeddingService._client is None:
+            self._initialize_openai()
+
+        response = EmbeddingService._client.embeddings.create(
+            model=get_settings().emb_model_name,
+            input=texts,
+        )
+        vectors = sorted(response.data, key=lambda item: item.index)
+        embeddings = np.asarray(
+            [item.embedding for item in vectors],
+            dtype=np.float32,
+        )
+        if normalize:
+            embeddings = np.asarray(
+                [self._normalize_embedding(vector) for vector in embeddings],
+                dtype=np.float32,
+            )
+
+        settings = get_settings()
+        actual_dimension = embeddings.shape[1]
+        if actual_dimension != settings.emb_dimension:
+            raise ValueError(
+                "Embedding dimension mismatch: configured %d, received %d"
+                % (settings.emb_dimension, actual_dimension)
+            )
+        return embeddings
     
     def generate_embedding(
         self,
@@ -119,8 +183,15 @@ class EmbeddingService:
         Returns:
             Embedding vector(s)
         """
-        prefix = prefix_for_role(role)
-        model_name = get_settings().emb_model_name
+        settings = get_settings()
+        provider = getattr(settings, "embedding_provider", "local").lower()
+        if provider not in {"local", "openai"}:
+            raise ValueError(
+                "EMBEDDING_PROVIDER must be either 'local' or 'openai'"
+            )
+
+        prefix = prefix_for_role(role) if provider == "local" else ""
+        model_name = settings.emb_model_name
         cache_scope = (
             document_id
             if document_id is not None
@@ -155,12 +226,16 @@ class EmbeddingService:
                         logger.debug(f"Cache hit for text embedding")
                         return cached_embedding
                 
-                # Single text
-                embedding = EmbeddingService._model.encode(
-                    f"{prefix}{text}",
-                    normalize_embeddings=normalize,
-                    show_progress_bar=False
-                )
+                if provider == "openai":
+                    embedding = self._generate_openai_embeddings(
+                        [text], normalize
+                    )[0]
+                else:
+                    embedding = EmbeddingService._model.encode(
+                        f"{prefix}{text}",
+                        normalize_embeddings=normalize,
+                        show_progress_bar=False
+                    )
                 
                 # Cache the result
                 if use_cache and cache_service:
@@ -197,12 +272,17 @@ class EmbeddingService:
                 
                 # Process uncached texts
                 if texts_to_process:
-                    new_embeddings = EmbeddingService._model.encode(
-                        [f"{prefix}{t}" for t in texts_to_process],
-                        normalize_embeddings=normalize,
-                        show_progress_bar=len(texts_to_process) > 100,
-                        batch_size=32
-                    )
+                    if provider == "openai":
+                        new_embeddings = self._generate_openai_embeddings(
+                            texts_to_process, normalize
+                        )
+                    else:
+                        new_embeddings = EmbeddingService._model.encode(
+                            [f"{prefix}{t}" for t in texts_to_process],
+                            normalize_embeddings=normalize,
+                            show_progress_bar=len(texts_to_process) > 100,
+                            batch_size=32
+                        )
 
                     # Cache new embeddings
                     if use_cache and cache_service:

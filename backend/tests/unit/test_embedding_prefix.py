@@ -98,3 +98,42 @@ def test_cache_key_separates_model_role_and_normalization(
     )
 
     assert model.calls == 4
+
+
+def test_openai_provider_batches_and_normalizes_embeddings(monkeypatch):
+    """OpenAI embeddings use the configured model without local ML imports."""
+    class FakeEmbeddings:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(data=[
+                SimpleNamespace(index=1, embedding=[0.0, 3.0, 4.0]),
+                SimpleNamespace(index=0, embedding=[3.0, 0.0, 4.0]),
+            ])
+
+    fake_embeddings = FakeEmbeddings()
+    monkeypatch.setattr(
+        embeddings_module,
+        "get_settings",
+        lambda: SimpleNamespace(
+            embedding_provider="openai",
+            emb_model_name="text-embedding-3-small",
+            emb_dimension=3,
+        ),
+    )
+    monkeypatch.setattr(EmbeddingService, "_client", SimpleNamespace(
+        embeddings=fake_embeddings,
+    ))
+    monkeypatch.setattr(embeddings_module, "cache_service", None)
+
+    service = object.__new__(EmbeddingService)
+    result = service.generate_embedding(["first", "second"])
+
+    assert fake_embeddings.calls == [{
+        "model": "text-embedding-3-small",
+        "input": ["first", "second"],
+    }]
+    np.testing.assert_allclose(result[0], [0.6, 0.0, 0.8])
+    np.testing.assert_allclose(result[1], [0.0, 0.6, 0.8])

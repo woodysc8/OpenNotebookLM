@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/opennotebook.db"
     ingestion_worker_concurrency: int = Field(default=1, ge=1, le=16)
     
-    # Embedding
+    # Embedding generation and retrieval index
+    embedding_provider: str = "local"  # local or openai
     # Multilingual, unlike the English-only bge-small it replaced. Chosen over
     # bge-m3 on memory: bge-m3 peaks at ~4.85 GB RSS against ~2.69 GB here, which
     # OOM-killed a full re-index on an 8 GB host. Changing this invalidates every

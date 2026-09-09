@@ -19,12 +19,8 @@ readability-lxml==0.8.1
 requests==2.34.2
 urllib3==2.7.0
 
-# Embeddings used to index uploaded PDF chunks
+# Numeric arrays used by SQLite vector and BM25 retrieval
 numpy>=1.26,<3
-sentence-transformers==5.7.0
-transformers==5.10.1
-huggingface-hub==1.27.0
-torch>=2.0
 
 # Authentication dependencies used by the protected upload route
 PyJWT[crypto]==2.13.0
