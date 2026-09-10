@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from app.config import get_settings
 from app.lifecycle import lifespan
 from app.routers import (
-    auth, projects, ingest, query, export, health, files, mindmap, video
+    auth, projects, ingest, query, export, health, files, mindmap, video, memories
 )
 from app.api import cache
 from app.utils.logging import setup_logging
@@ -54,6 +54,7 @@ app.include_router(query.router, prefix="/api", tags=["query"])
 app.include_router(export.router, prefix="/api", tags=["export"])
 app.include_router(mindmap.router, prefix="/api", tags=["mindmap"])
 app.include_router(video.router, prefix="/api", tags=["video summary"])
+app.include_router(memories.router, prefix="/api", tags=["memories"])
 app.include_router(cache.router)  # Cache management endpoints
 
 
