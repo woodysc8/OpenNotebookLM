@@ -1,6 +1,6 @@
 """Pydantic schemas for API models."""
 from datetime import datetime
-from typing import Annotated, Optional, List, Dict, Any
+from typing import Annotated, Optional, List, Dict, Any, Literal
 from pydantic import AfterValidator, BaseModel, Field, field_validator
 
 from app.utils.time import as_utc
@@ -77,6 +77,60 @@ class DemoAccountResponse(BaseModel):
     enabled: bool
     username: Optional[str] = None
     password: Optional[str] = None
+
+
+# Personal memory schemas
+class MemoryCreate(BaseModel):
+    """Schema for creating or replacing a durable memory."""
+    category: str = Field(..., min_length=1, max_length=50)
+    content: str = Field(..., min_length=1, max_length=10000)
+    source: str = Field(..., min_length=1, max_length=100)
+    source_id: Optional[str] = Field(None, max_length=255)
+    importance: int = Field(default=0, ge=0, le=100)
+    memory_key: Optional[str] = Field(None, min_length=1, max_length=255)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryUpdate(BaseModel):
+    """Schema for changing a durable memory."""
+    category: Optional[str] = Field(None, min_length=1, max_length=50)
+    content: Optional[str] = Field(None, min_length=1, max_length=10000)
+    source: Optional[str] = Field(None, min_length=1, max_length=100)
+    source_id: Optional[str] = Field(None, max_length=255)
+    importance: Optional[int] = Field(None, ge=0, le=100)
+    memory_key: Optional[str] = Field(None, min_length=1, max_length=255)
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class MemoryResponse(BaseModel):
+    """Schema for a durable memory returned by the API."""
+    id: str
+    user_id: str
+    category: str
+    content: str
+    source: str
+    source_id: Optional[str] = None
+    importance: int
+    memory_key: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+
+class MemorySearchRequest(BaseModel):
+    """Schema for lexical memory search."""
+    query: str = Field(default="", max_length=1000)
+    category: Optional[str] = Field(None, min_length=1, max_length=50)
+    source: Optional[str] = Field(None, min_length=1, max_length=100)
+    memory_key: Optional[str] = Field(None, min_length=1, max_length=255)
+    sort: Literal["relevance", "updated_at"] = "relevance"
+    limit: int = Field(default=10, ge=1, le=100)
+
+
+class MemoryListResponse(BaseModel):
+    """Schema for a memory search result."""
+    memories: List[MemoryResponse]
+    total: int
 
 
 # Project schemas

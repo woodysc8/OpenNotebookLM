@@ -117,6 +117,10 @@ ADDED_COLUMNS = (
     ),
 )
 
+ADDED_INDEXES = (
+    ("memories", "uq_memories_user_memory_key", "user_id, memory_key", True),
+)
+
 
 def ensure_added_columns(bind=None):
     """Add any column in ADDED_COLUMNS that this database does not have yet.
@@ -154,10 +158,43 @@ def ensure_added_columns(bind=None):
     return added
 
 
+def ensure_added_indexes(bind=None):
+    """Create indexes added after a database file was first initialized.
+
+    Args:
+        bind: Engine to inspect and alter. Defaults to the module engine.
+
+    Returns:
+        The indexes that were added.
+    """
+    bind = bind or engine
+    inspector = inspect(bind)
+    added = []
+    existing_indexes = {
+        (table, index["name"])
+        for table in inspector.get_table_names()
+        for index in inspector.get_indexes(table)
+    }
+
+    for table, index_name, columns, unique in ADDED_INDEXES:
+        if table not in inspector.get_table_names() or (table, index_name) in existing_indexes:
+            continue
+        unique_sql = "UNIQUE " if unique else ""
+        with bind.begin() as connection:
+            connection.execute(text(
+                "CREATE %sINDEX IF NOT EXISTS %s ON %s (%s)" % (
+                    unique_sql, index_name, table, columns)
+            ))
+        added.append("%s.%s" % (table, index_name))
+
+    return added
+
+
 def init_db():
     """Initialize database tables, and upgrade an older one in place."""
     Base.metadata.create_all(bind=engine)
     ensure_added_columns()
+    ensure_added_indexes()
     # Import inside startup after models exist to avoid a database/service
     # import cycle. Committing the virtual-table schema here makes health
     # diagnostics accurate before the first retrieval request.

@@ -1,5 +1,5 @@
 """Authentication router: register, sign in and identify the caller."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 import structlog
@@ -72,6 +72,36 @@ async def get_current_user(
             headers=BEARER_CHALLENGE,
         )
     return user
+
+
+async def get_memory_user(
+    token: str = Depends(oauth2_scheme),
+    service_user_id: str = Header(default="", alias="X-Second-Brain-User"),
+    db: Session = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
+    settings: Settings = Depends(get_settings),
+) -> User:
+    """Authenticate memory requests with a JWT or Sheila's scoped service token.
+
+    The service credential is deliberately limited to the configured Sam 2
+    account. The caller cannot turn it into a general user impersonation
+    mechanism by choosing another header value.
+    """
+    if token and settings.second_brain_service_token and token == settings.second_brain_service_token:
+        configured_user_id = (settings.second_brain_service_user_id or "").strip()
+        if not configured_user_id:
+            raise HTTPException(status_code=503, detail="Memory service identity is not configured")
+        if service_user_id.strip() != configured_user_id:
+            raise HTTPException(status_code=403, detail="Memory service identity is not allowed")
+        user = db.query(User).filter(
+            User.id == configured_user_id,
+            User.is_active.is_(True),
+        ).first()
+        if not user:
+            raise HTTPException(status_code=503, detail="Memory service identity is unavailable")
+        return user
+
+    return await get_current_user(token=token, db=db, auth_service=auth_service)
 
 
 @router.post(

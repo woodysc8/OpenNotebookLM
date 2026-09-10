@@ -126,6 +126,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 720
     allow_public_registration: Optional[bool] = None
+    # Service-to-service credential for Sheila's memory calls only. The token
+    # is accepted only by the memory router and maps to this one configured
+    # account; it cannot select an arbitrary user.
+    second_brain_service_token: Optional[str] = None
+    second_brain_service_user_id: Optional[str] = None
 
     # A demo account the deployment keeps present so a fresh database is not a
     # locked door. Its credentials are published on the sign-in page, so any

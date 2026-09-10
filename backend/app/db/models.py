@@ -57,10 +57,36 @@ class User(Base):
     # Relationships
     projects = relationship("Project", back_populates="owner")
     documents = relationship("Document", back_populates="owner")
+    memories = relationship("Memory", back_populates="owner", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_users_username", "username"),
         Index("idx_users_email", "email"),
+    )
+
+
+class Memory(Base):
+    """Durable personal memory owned by one account."""
+    __tablename__ = "memories"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    category = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    source = Column(String, nullable=False)
+    source_id = Column(String)
+    importance = Column(Integer, default=0, nullable=False)
+    memory_key = Column(String)
+    metadata_json = Column("metadata", JSON, default=dict, nullable=False)
+    created_at = Column(UTCDateTime, default=utc_now, nullable=False)
+    updated_at = Column(UTCDateTime, default=utc_now, onupdate=utc_now, nullable=False)
+
+    owner = relationship("User", back_populates="memories")
+
+    __table_args__ = (
+        Index("idx_memories_user_id", "user_id"),
+        Index("uq_memories_user_memory_key", "user_id", "memory_key", unique=True),
+        Index("idx_memories_user_category", "user_id", "category"),
     )
 
 
