@@ -10,6 +10,27 @@ from app.db.models import Base, User
 from app.services.auth import get_auth_service
 
 
+def test_database_url_diagnostic_excludes_password():
+    """Startup diagnostics must never include the database password itself."""
+    from app.lifecycle import _database_url_diagnostic
+
+    password = "never-log-this-password"
+    diagnostic = _database_url_diagnostic(
+        "postgresql://sam:%s@db.example.test:5432/opennotebook" % password
+    )
+
+    assert diagnostic == {
+        "scheme": "postgresql",
+        "host": "db.example.test",
+        "port": 5432,
+        "user": "sam",
+        "db": "opennotebook",
+        "password_present": True,
+        "password_length": len(password),
+    }
+    assert password not in repr(diagnostic)
+
+
 def isolated_sessions():
     """Create an isolated account database and session factory.
 

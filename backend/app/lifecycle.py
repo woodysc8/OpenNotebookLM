@@ -3,15 +3,38 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from sqlalchemy.engine import make_url
 import structlog
 
 from app.config import get_settings
-from app.db.database import SessionLocal, init_db
+from app.db.database import SessionLocal, init_db, settings as database_settings
 from app.services.auth import get_auth_service
 from app.services.bootstrap import ensure_demo_account
 from app.services.ingestion_jobs import IngestionJobWorker
 
 logger = structlog.get_logger()
+
+
+def _database_url_diagnostic(database_url: str) -> dict[str, object]:
+    """Return only safe connection metadata for a startup diagnostic.
+
+    Args:
+        database_url: Configured SQLAlchemy database URL.
+
+    Returns:
+        Connection fields that cannot expose the password itself.
+    """
+    parsed_url = make_url(database_url)
+    password = parsed_url.password
+    return {
+        "scheme": parsed_url.get_backend_name(),
+        "host": parsed_url.host,
+        "port": parsed_url.port,
+        "user": parsed_url.username,
+        "db": parsed_url.database,
+        "password_present": password is not None,
+        "password_length": len(password) if password is not None else 0,
+    }
 
 
 @asynccontextmanager
@@ -24,15 +47,25 @@ async def lifespan(app: FastAPI):
     Returns:
         An async context manager that yields while the app is serving.
     """
+    logger.info("STARTUP CHECKPOINT: lifespan entered")
     logger.info("Starting OpenNotebookLM", version="0.1.0")
 
     # Auth dependencies are otherwise built on the first protected request.
     # Resolve them now so a production instance cannot advertise readiness
     # while every authenticated request is guaranteed to fail.
+    logger.info("STARTUP CHECKPOINT: before auth service")
     get_auth_service()
+    logger.info("STARTUP CHECKPOINT: auth service ready")
 
+    logger.info("STARTUP CHECKPOINT: before init_db")
+    logger.info(
+        "DATABASE_URL diagnostic",
+        **_database_url_diagnostic(database_settings.database_url),
+    )
     init_db()
+    logger.info("STARTUP CHECKPOINT: init_db complete")
     logger.info("Database initialized")
+    logger.info("STARTUP CHECKPOINT: before demo account")
 
     settings = get_settings()
 
@@ -73,6 +106,7 @@ async def lifespan(app: FastAPI):
         concurrency=settings.ingestion_worker_concurrency,
     )
 
+    logger.info("STARTUP CHECKPOINT: before yield")
     try:
         yield
     finally:

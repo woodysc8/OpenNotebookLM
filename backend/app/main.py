@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+import structlog
 
 from app.config import get_settings
 from app.lifecycle import lifespan
@@ -18,6 +19,7 @@ from app.middleware.upload_body_limit import UploadBodyLimitMiddleware
 setup_logging()
 
 settings = get_settings()
+logger = structlog.get_logger()
 
 # Create FastAPI app
 app = FastAPI(
@@ -27,6 +29,7 @@ app = FastAPI(
     lifespan=lifespan,
     debug=settings.debug,
 )
+logger.info("STARTUP CHECKPOINT: app.main loaded")
 
 # Starlette makes the most recently added middleware outermost. The upload
 # guard must remain ahead of routing/form parsing, while CORS must wrap its
