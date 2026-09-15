@@ -7,6 +7,23 @@ from app.db import database
 from app.db.models import Base, Document, IngestionJob
 
 
+def test_driverless_postgresql_url_uses_installed_psycopg_driver():
+    """A conventional PostgreSQL URL must not require psycopg2.
+
+    Returns:
+        None.
+    """
+    engine = database.create_database_engine(
+        "postgresql://postgres:postgres@localhost:5432/opennotebook",
+        echo=False,
+    )
+    try:
+        assert engine.dialect.name == "postgresql"
+        assert engine.dialect.driver == "psycopg"
+    finally:
+        engine.dispose()
+
+
 def test_added_columns_upgrades_stored_fts_posting_tokens(tmp_path):
     """An interim retrieval table gains exact indexed tokens idempotently.
 

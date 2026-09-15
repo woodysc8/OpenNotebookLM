@@ -5,8 +5,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import create_engine
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from app.db.database import get_db
 from app.config import Settings, get_settings
@@ -165,3 +167,16 @@ def test_updated_at_sort_beats_importance_for_latest_selection(clients):
 
     result = service.post("/api/memories/search", json={"sort": "updated_at", "limit": 1})
     assert result.json()["memories"][0]["id"] == newer["id"]
+
+
+def test_memory_schema_compiles_for_postgresql():
+    """Memory CRUD's ORM schema is portable to PostgreSQL's SQL dialect."""
+    table_sql = str(CreateTable(Memory.__table__).compile(dialect=postgresql.dialect()))
+    index_sql = [
+        str(CreateIndex(index).compile(dialect=postgresql.dialect()))
+        for index in Memory.__table__.indexes
+    ]
+
+    assert "CREATE TABLE memories" in table_sql
+    assert "metadata JSON" in table_sql
+    assert any("user_id, memory_key" in statement for statement in index_sql)

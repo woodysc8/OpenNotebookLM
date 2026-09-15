@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable, Optional, Sequence
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -216,23 +216,30 @@ class RetrievalIndex:
                 self._dense_backend = "sqlitevec"
                 self._dense_available = existing_dimension is not None
 
-        try:
-            db.execute(
-                text(
-                    "CREATE VIRTUAL TABLE IF NOT EXISTS %s USING fts5("
-                    "lexical_text, content='retrieval_index_entries', "
-                    "content_rowid='id', tokenize='unicode61')" % FTS_TABLE
-                )
-            )
-        except OperationalError as error:
-            if "no such module: fts5" not in str(error).lower():
-                raise
+        if db.get_bind().dialect.name != "sqlite":
             self._lexical_backend = "python-bm25"
             self._lexical_available = True
-            self._remember_fallback("FTS5 unavailable (OperationalError)")
+            self._remember_fallback(
+                "FTS5 unavailable (database dialect is not SQLite)"
+            )
         else:
-            self._lexical_backend = "fts5"
-            self._lexical_available = True
+            try:
+                db.execute(
+                    text(
+                        "CREATE VIRTUAL TABLE IF NOT EXISTS %s USING fts5("
+                        "lexical_text, content='retrieval_index_entries', "
+                        "content_rowid='id', tokenize='unicode61')" % FTS_TABLE
+                    )
+                )
+            except OperationalError as error:
+                if "no such module: fts5" not in str(error).lower():
+                    raise
+                self._lexical_backend = "python-bm25"
+                self._lexical_available = True
+                self._remember_fallback("FTS5 unavailable (OperationalError)")
+            else:
+                self._lexical_backend = "fts5"
+                self._lexical_available = True
 
         # Schema checks are on every candidate query. Row-count diagnostics are
         # intentionally excluded here: status(db) joins canonical embeddings
@@ -1101,19 +1108,21 @@ class RetrievalIndex:
 
     @staticmethod
     def _table_exists(db: Session, table_name: str) -> bool:
-        """Return whether a SQLite table exists without creating it.
+        """Return whether a table exists without creating it.
 
         Args:
             db: Database session.
             table_name: Exact internal table name.
 
         Returns:
-            True when sqlite_master contains the table.
+            True when the bound database exposes the table.
         """
-        return db.execute(
-            text("SELECT 1 FROM sqlite_master WHERE name = :name LIMIT 1"),
-            {"name": table_name},
-        ).first() is not None
+        if db.get_bind().dialect.name == "sqlite":
+            return db.execute(
+                text("SELECT 1 FROM sqlite_master WHERE name = :name LIMIT 1"),
+                {"name": table_name},
+            ).first() is not None
+        return inspect(db.connection()).has_table(table_name)
 
     def _vector_dimension(self, db: Session) -> Optional[int]:
         """Read the vec0 dimension from its persisted CREATE statement.

@@ -1,11 +1,20 @@
 """Persistent dense and lexical retrieval index coverage."""
 import pytest
 import numpy as np
+from types import SimpleNamespace
+from unittest.mock import patch
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.db.models import Base, Chunk, Document, Embedding
+from app.db.models import (
+    Base,
+    Chunk,
+    Document,
+    Embedding,
+    RetrievalIndexEntry,
+    RetrievalIndexFTSTombstone,
+)
 from app.services import retrieval_index as retrieval_index_module
 from app.services.retrieval_index import (
     IndexedChunk,
@@ -130,6 +139,31 @@ def test_status_discloses_each_active_backend_and_extension_version() -> None:
     assert payload["dense_backend"] == "brute"
     assert payload["lexical_backend"] == "fts5"
     assert payload["sqlitevec_version"] is None
+
+
+def test_postgresql_schema_uses_fallbacks_without_virtual_table_ddl(monkeypatch) -> None:
+    """A non-SQLite dialect must not attempt SQLite FTS5 initialization."""
+    class PostgreSQLSession:
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+        def connection(self):
+            return object()
+
+        def execute(self, *_args, **_kwargs):
+            pytest.fail("PostgreSQL startup attempted SQLite virtual-table SQL")
+
+    monkeypatch.setattr(
+        retrieval_index_module,
+        "get_settings",
+        lambda: SimpleNamespace(emb_backend="sqlitevec"),
+    )
+    with patch.object(RetrievalIndexEntry.__table__, "create"), \
+        patch.object(RetrievalIndexFTSTombstone.__table__, "create"):
+        status = RetrievalIndex().ensure_schema(PostgreSQLSession(), dimension=2)
+
+    assert status.active_backend == "brute+python-bm25"
+    assert "database dialect is not SQLite" in status.fallback_reason
 
 
 def test_dense_search_applies_document_scope_before_database_top_k(db) -> None:

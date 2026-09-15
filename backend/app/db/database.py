@@ -31,6 +31,10 @@ def create_database_engine(database_url: str, echo: bool) -> Engine:
     """
     parsed_url = make_url(database_url)
     if parsed_url.get_backend_name() != "sqlite":
+        if parsed_url.drivername == "postgresql":
+            # SQLAlchemy otherwise selects psycopg2 for a driverless PostgreSQL
+            # URL, while this application installs psycopg v3.
+            database_url = str(parsed_url.set(drivername="postgresql+psycopg"))
         return create_engine(database_url, echo=echo, pool_pre_ping=True)
 
     is_memory = parsed_url.database in (None, "", ":memory:")
