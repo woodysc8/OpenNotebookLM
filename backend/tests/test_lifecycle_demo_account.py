@@ -1,4 +1,6 @@
 """The demo account is present after startup, not only after a manual script."""
+import hashlib
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -10,14 +12,15 @@ from app.db.models import Base, User
 from app.services.auth import get_auth_service
 
 
-def test_database_url_diagnostic_excludes_password():
-    """Startup diagnostics must never include the database password itself."""
-    from app.lifecycle import _database_url_diagnostic
+def test_database_url_diagnostic_fingerprints_parsed_password():
+    """Startup diagnostics must expose a stable fingerprint, never a password."""
+    from app.lifecycle import _database_url_diagnostic, _password_sha256_fingerprint
 
     password = "never-log-this-password"
     diagnostic = _database_url_diagnostic(
         "postgresql://sam:%s@db.example.test:5432/opennotebook" % password
     )
+    fingerprint = _password_sha256_fingerprint(password)
 
     assert diagnostic == {
         "scheme": "postgresql",
@@ -27,8 +30,11 @@ def test_database_url_diagnostic_excludes_password():
         "db": "opennotebook",
         "password_present": True,
         "password_length": len(password),
+        "password_sha256": hashlib.sha256(password.encode("utf-8")).hexdigest(),
     }
     assert password not in repr(diagnostic)
+    assert password not in fingerprint
+    assert fingerprint == _password_sha256_fingerprint(password)
 
 
 def isolated_sessions():

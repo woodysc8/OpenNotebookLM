@@ -1,4 +1,5 @@
 """Application startup and shutdown resource management."""
+import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,6 +14,20 @@ from app.services.bootstrap import ensure_demo_account
 from app.services.ingestion_jobs import IngestionJobWorker
 
 logger = structlog.get_logger()
+
+
+def _password_sha256_fingerprint(password: str | None) -> str | None:
+    """Return a non-reversible fingerprint suitable for credential diagnostics.
+
+    Args:
+        password: Password extracted from a parsed SQLAlchemy URL.
+
+    Returns:
+        Hexadecimal SHA-256 digest, or None when the URL has no password.
+    """
+    if password is None:
+        return None
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
 
 
 def _database_url_diagnostic(database_url: str) -> dict[str, object]:
@@ -34,6 +49,7 @@ def _database_url_diagnostic(database_url: str) -> dict[str, object]:
         "db": parsed_url.database,
         "password_present": password is not None,
         "password_length": len(password) if password is not None else 0,
+        "password_sha256": _password_sha256_fingerprint(password),
     }
 
 
